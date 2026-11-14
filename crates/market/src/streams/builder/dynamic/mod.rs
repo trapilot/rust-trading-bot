@@ -16,6 +16,7 @@ use crate::{
         },
         kraken::{Kraken, market::KrakenMarket},
         okx::{Okx, market::OkxMarket},
+        ssi::{Ssi, market::SsiMarket},
     },
     instrument::InstrumentData,
     streams::{
@@ -106,6 +107,9 @@ impl<InstrumentKey> DynamicStreams<InstrumentKey> {
         Subscription<Kraken, Instrument, PublicTrades>: Identifier<KrakenMarket>,
         Subscription<Kraken, Instrument, OrderBooksL1>: Identifier<KrakenMarket>,
         Subscription<Okx, Instrument, PublicTrades>: Identifier<OkxMarket>,
+        Subscription<Ssi, Instrument, PublicTrades>: Identifier<SsiMarket>,
+        Subscription<Ssi, Instrument, OrderBooksL1>: Identifier<SsiMarket>,
+        Subscription<Ssi, Instrument, OrderBooksL2>: Identifier<SsiMarket>,
     {
         // Validate & dedup Subscription batches
         let batches = validate_batches(subscription_batches)?;
@@ -620,6 +624,54 @@ impl<InstrumentKey> DynamicStreams<InstrumentKey> {
                                         tokio::spawn(
                                             stream.forward_to(
                                                 txs.trades.get(&exchange).unwrap().clone(),
+                                            ),
+                                        )
+                                    }),
+                                    (ExchangeId::Ssi, SubKind::PublicTrades) => init_market_stream(
+                                        STREAM_RECONNECTION_POLICY,
+                                        subs.into_iter()
+                                            .map(|sub| {
+                                                Subscription::new(Ssi, sub.instrument, PublicTrades)
+                                            })
+                                            .collect(),
+                                    )
+                                    .await
+                                    .map(|stream| {
+                                        tokio::spawn(
+                                            stream.forward_to(
+                                                txs.trades.get(&exchange).unwrap().clone(),
+                                            ),
+                                        )
+                                    }),
+                                    (ExchangeId::Ssi, SubKind::OrderBooksL1) => init_market_stream(
+                                        STREAM_RECONNECTION_POLICY,
+                                        subs.into_iter()
+                                            .map(|sub| {
+                                                Subscription::new(Ssi, sub.instrument, OrderBooksL1)
+                                            })
+                                            .collect(),
+                                    )
+                                    .await
+                                    .map(|stream| {
+                                        tokio::spawn(
+                                            stream.forward_to(
+                                                txs.l1s.get(&exchange).unwrap().clone(),
+                                            ),
+                                        )
+                                    }),
+                                    (ExchangeId::Ssi, SubKind::OrderBooksL2) => init_market_stream(
+                                        STREAM_RECONNECTION_POLICY,
+                                        subs.into_iter()
+                                            .map(|sub| {
+                                                Subscription::new(Ssi, sub.instrument, OrderBooksL2)
+                                            })
+                                            .collect(),
+                                    )
+                                    .await
+                                    .map(|stream| {
+                                        tokio::spawn(
+                                            stream.forward_to(
+                                                txs.l2s.get(&exchange).unwrap().clone(),
                                             ),
                                         )
                                     }),

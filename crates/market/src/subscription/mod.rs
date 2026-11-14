@@ -277,6 +277,7 @@ pub fn exchange_supports_instrument_kind_sub_kind(
         (GateioOptions, Option { .. }, PublicTrades) => true,
         (Kraken, Spot, PublicTrades | OrderBooksL1) => true,
         (Okx, Spot | Future { .. } | Perpetual | Option { .. }, PublicTrades) => true,
+        (Ssi, Spot, PublicTrades | OrderBooksL1 | OrderBooksL2) => true,
 
         (_, _, _) => false,
     }

@@ -74,6 +74,8 @@ pub enum ExchangeId {
     Mexc,
     Okx,
     Poloniex,
+    /// SSI Securities (Vietnam stock market), via SSI FastConnect Data.
+    Ssi,
 }
 
 impl ExchangeId {
@@ -122,6 +124,7 @@ impl ExchangeId {
             ExchangeId::Mexc => "mexc",
             ExchangeId::Okx => "okx",
             ExchangeId::Poloniex => "poloniex",
+            ExchangeId::Ssi => "ssi",
         }
     }
 }
