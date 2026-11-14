@@ -1,3 +1,6 @@
+// clippy >= 1.100 flags the `Self { field: field }` that `derive_more::Constructor` generates.
+#![allow(clippy::redundant_field_names)]
+
 use derive_more::Constructor;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;

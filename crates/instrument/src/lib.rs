@@ -11,6 +11,8 @@
     rust_2024_compatibility
 )]
 #![allow(clippy::type_complexity, clippy::too_many_arguments, type_alias_bounds)]
+// clippy >= 1.100 flags the `Self { field: field }` that `derive_more::Constructor` generates.
+#![allow(clippy::redundant_field_names)]
 
 //! # Trading-Bot-Instrument
 //! Trading-Bot-Instrument contains core Exchange, Instrument and Asset data structures and associated utilities.

@@ -11,6 +11,8 @@
     rust_2024_compatibility
 )]
 #![allow(clippy::type_complexity, clippy::too_many_arguments, type_alias_bounds)]
+// clippy >= 1.100 flags the `Self { field: field }` that `derive_more::Constructor` generates.
+#![allow(clippy::redundant_field_names)]
 
 //! # Trading-Bot-Execution
 //! Stream private account data from financial venues, and execute (live or mock) orders. Also provides
