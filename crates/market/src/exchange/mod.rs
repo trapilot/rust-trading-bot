@@ -39,6 +39,10 @@ pub mod okx;
 /// `Ssi` (SSI Securities, Vietnam stock market) [`Connector`] and [`StreamSelector`] implementations.
 pub mod ssi;
 
+/// `Tcbs` (Techcombank Securities, Vietnam stock market) [`Connector`] and [`StreamSelector`]
+/// implementations.
+pub mod tcbs;
+
 /// Defines the generic [`ExchangeSub`] containing a market and channel combination used by an
 /// exchange [`Connector`] to build [`WsMessage`] subscription payloads.
 pub mod subscription;

@@ -17,6 +17,7 @@ use crate::{
         kraken::{Kraken, market::KrakenMarket},
         okx::{Okx, market::OkxMarket},
         ssi::{Ssi, market::SsiMarket},
+        tcbs::{Tcbs, market::TcbsMarket},
     },
     instrument::InstrumentData,
     streams::{
@@ -110,6 +111,9 @@ impl<InstrumentKey> DynamicStreams<InstrumentKey> {
         Subscription<Ssi, Instrument, PublicTrades>: Identifier<SsiMarket>,
         Subscription<Ssi, Instrument, OrderBooksL1>: Identifier<SsiMarket>,
         Subscription<Ssi, Instrument, OrderBooksL2>: Identifier<SsiMarket>,
+        Subscription<Tcbs, Instrument, PublicTrades>: Identifier<TcbsMarket>,
+        Subscription<Tcbs, Instrument, OrderBooksL1>: Identifier<TcbsMarket>,
+        Subscription<Tcbs, Instrument, OrderBooksL2>: Identifier<TcbsMarket>,
     {
         // Validate & dedup Subscription batches
         let batches = validate_batches(subscription_batches)?;
@@ -117,505 +121,29 @@ impl<InstrumentKey> DynamicStreams<InstrumentKey> {
         // Generate required Channels from Subscription batches
         let channels = Channels::try_from(&batches)?;
 
-        let futures =
-            batches.into_iter().map(|mut batch| {
-                batch.sort_unstable_by_key(|sub| (sub.exchange, sub.kind));
-                let by_exchange_by_sub_kind =
-                    batch.into_iter().chunk_by(|sub| (sub.exchange, sub.kind));
+        let futures = batches.into_iter().map(|mut batch| {
+            batch.sort_unstable_by_key(|sub| (sub.exchange, sub.kind));
+            let by_exchange_by_sub_kind =
+                batch.into_iter().chunk_by(|sub| (sub.exchange, sub.kind));
 
-                let batch_futures =
-                    by_exchange_by_sub_kind
-                        .into_iter()
-                        .map(|((exchange, sub_kind), subs)| {
-                            let subs = subs.into_iter().collect::<Vec<_>>();
-                            let txs = Arc::clone(&channels.txs);
-                            async move {
-                                match (exchange, sub_kind) {
-                                    (ExchangeId::BinanceSpot, SubKind::PublicTrades) => {
-                                        init_market_stream(
-                                            STREAM_RECONNECTION_POLICY,
-                                            subs.into_iter()
-                                                .map(|sub| {
-                                                    Subscription::new(
-                                                        BinanceSpot::default(),
-                                                        sub.instrument,
-                                                        PublicTrades,
-                                                    )
-                                                })
-                                                .collect(),
-                                        )
-                                        .await
-                                        .map(|stream| {
-                                            tokio::spawn(stream.forward_to(
-                                                txs.trades.get(&exchange).unwrap().clone(),
-                                            ))
-                                        })
-                                    }
-                                    (ExchangeId::BinanceSpot, SubKind::OrderBooksL1) => {
-                                        init_market_stream(
-                                            STREAM_RECONNECTION_POLICY,
-                                            subs.into_iter()
-                                                .map(|sub| {
-                                                    Subscription::new(
-                                                        BinanceSpot::default(),
-                                                        sub.instrument,
-                                                        OrderBooksL1,
-                                                    )
-                                                })
-                                                .collect(),
-                                        )
-                                        .await
-                                        .map(|stream| {
-                                            tokio::spawn(stream.forward_to(
-                                                txs.l1s.get(&exchange).unwrap().clone(),
-                                            ))
-                                        })
-                                    }
-                                    (ExchangeId::BinanceSpot, SubKind::OrderBooksL2) => {
-                                        init_market_stream(
-                                            STREAM_RECONNECTION_POLICY,
-                                            subs.into_iter()
-                                                .map(|sub| {
-                                                    Subscription::new(
-                                                        BinanceSpot::default(),
-                                                        sub.instrument,
-                                                        OrderBooksL2,
-                                                    )
-                                                })
-                                                .collect(),
-                                        )
-                                        .await
-                                        .map(|stream| {
-                                            tokio::spawn(stream.forward_to(
-                                                txs.l2s.get(&exchange).unwrap().clone(),
-                                            ))
-                                        })
-                                    }
-                                    (ExchangeId::BinanceFuturesUsd, SubKind::PublicTrades) => {
-                                        init_market_stream(
-                                            STREAM_RECONNECTION_POLICY,
-                                            subs.into_iter()
-                                                .map(|sub| {
-                                                    Subscription::new(
-                                                        BinanceFuturesUsd::default(),
-                                                        sub.instrument,
-                                                        PublicTrades,
-                                                    )
-                                                })
-                                                .collect(),
-                                        )
-                                        .await
-                                        .map(|stream| {
-                                            tokio::spawn(stream.forward_to(
-                                                txs.trades.get(&exchange).unwrap().clone(),
-                                            ))
-                                        })
-                                    }
-                                    (ExchangeId::BinanceFuturesUsd, SubKind::OrderBooksL1) => {
-                                        init_market_stream(
-                                            STREAM_RECONNECTION_POLICY,
-                                            subs.into_iter()
-                                                .map(|sub| {
-                                                    Subscription::<_, Instrument, _>::new(
-                                                        BinanceFuturesUsd::default(),
-                                                        sub.instrument,
-                                                        OrderBooksL1,
-                                                    )
-                                                })
-                                                .collect(),
-                                        )
-                                        .await
-                                        .map(|stream| {
-                                            tokio::spawn(stream.forward_to(
-                                                txs.l1s.get(&exchange).unwrap().clone(),
-                                            ))
-                                        })
-                                    }
-                                    (ExchangeId::BinanceFuturesUsd, SubKind::OrderBooksL2) => {
-                                        init_market_stream(
-                                            STREAM_RECONNECTION_POLICY,
-                                            subs.into_iter()
-                                                .map(|sub| {
-                                                    Subscription::<_, Instrument, _>::new(
-                                                        BinanceFuturesUsd::default(),
-                                                        sub.instrument,
-                                                        OrderBooksL2,
-                                                    )
-                                                })
-                                                .collect(),
-                                        )
-                                        .await
-                                        .map(|stream| {
-                                            tokio::spawn(stream.forward_to(
-                                                txs.l2s.get(&exchange).unwrap().clone(),
-                                            ))
-                                        })
-                                    }
-                                    (ExchangeId::BinanceFuturesUsd, SubKind::Liquidations) => {
-                                        init_market_stream(
-                                            STREAM_RECONNECTION_POLICY,
-                                            subs.into_iter()
-                                                .map(|sub| {
-                                                    Subscription::<_, Instrument, _>::new(
-                                                        BinanceFuturesUsd::default(),
-                                                        sub.instrument,
-                                                        Liquidations,
-                                                    )
-                                                })
-                                                .collect(),
-                                        )
-                                        .await
-                                        .map(|stream| {
-                                            tokio::spawn(stream.forward_to(
-                                                txs.liquidations.get(&exchange).unwrap().clone(),
-                                            ))
-                                        })
-                                    }
-                                    (ExchangeId::Bitfinex, SubKind::PublicTrades) => {
-                                        init_market_stream(
-                                            STREAM_RECONNECTION_POLICY,
-                                            subs.into_iter()
-                                                .map(|sub| {
-                                                    Subscription::new(
-                                                        Bitfinex,
-                                                        sub.instrument,
-                                                        PublicTrades,
-                                                    )
-                                                })
-                                                .collect(),
-                                        )
-                                        .await
-                                        .map(|stream| {
-                                            tokio::spawn(stream.forward_to(
-                                                txs.trades.get(&exchange).unwrap().clone(),
-                                            ))
-                                        })
-                                    }
-                                    (ExchangeId::Bitmex, SubKind::PublicTrades) => {
-                                        init_market_stream(
-                                            STREAM_RECONNECTION_POLICY,
-                                            subs.into_iter()
-                                                .map(|sub| {
-                                                    Subscription::new(
-                                                        Bitmex,
-                                                        sub.instrument,
-                                                        PublicTrades,
-                                                    )
-                                                })
-                                                .collect(),
-                                        )
-                                        .await
-                                        .map(|stream| {
-                                            tokio::spawn(stream.forward_to(
-                                                txs.trades.get(&exchange).unwrap().clone(),
-                                            ))
-                                        })
-                                    }
-                                    (ExchangeId::BybitSpot, SubKind::PublicTrades) => {
-                                        init_market_stream(
-                                            STREAM_RECONNECTION_POLICY,
-                                            subs.into_iter()
-                                                .map(|sub| {
-                                                    Subscription::new(
-                                                        BybitSpot::default(),
-                                                        sub.instrument,
-                                                        PublicTrades,
-                                                    )
-                                                })
-                                                .collect(),
-                                        )
-                                        .await
-                                        .map(|stream| {
-                                            tokio::spawn(stream.forward_to(
-                                                txs.trades.get(&exchange).unwrap().clone(),
-                                            ))
-                                        })
-                                    }
-                                    (ExchangeId::BybitSpot, SubKind::OrderBooksL1) => {
-                                        init_market_stream(
-                                            STREAM_RECONNECTION_POLICY,
-                                            subs.into_iter()
-                                                .map(|sub| {
-                                                    Subscription::new(
-                                                        BybitSpot::default(),
-                                                        sub.instrument,
-                                                        OrderBooksL1,
-                                                    )
-                                                })
-                                                .collect(),
-                                        )
-                                        .await
-                                        .map(|stream| {
-                                            tokio::spawn(stream.forward_to(
-                                                txs.l1s.get(&exchange).unwrap().clone(),
-                                            ))
-                                        })
-                                    }
-                                    (ExchangeId::BybitSpot, SubKind::OrderBooksL2) => {
-                                        init_market_stream(
-                                            STREAM_RECONNECTION_POLICY,
-                                            subs.into_iter()
-                                                .map(|sub| {
-                                                    Subscription::new(
-                                                        BybitSpot::default(),
-                                                        sub.instrument,
-                                                        OrderBooksL2,
-                                                    )
-                                                })
-                                                .collect(),
-                                        )
-                                        .await
-                                        .map(|stream| {
-                                            tokio::spawn(stream.forward_to(
-                                                txs.l2s.get(&exchange).unwrap().clone(),
-                                            ))
-                                        })
-                                    }
-                                    (ExchangeId::BybitPerpetualsUsd, SubKind::PublicTrades) => {
-                                        init_market_stream(
-                                            STREAM_RECONNECTION_POLICY,
-                                            subs.into_iter()
-                                                .map(|sub| {
-                                                    Subscription::new(
-                                                        BybitPerpetualsUsd::default(),
-                                                        sub.instrument,
-                                                        PublicTrades,
-                                                    )
-                                                })
-                                                .collect(),
-                                        )
-                                        .await
-                                        .map(|stream| {
-                                            tokio::spawn(stream.forward_to(
-                                                txs.trades.get(&exchange).unwrap().clone(),
-                                            ))
-                                        })
-                                    }
-                                    (ExchangeId::BybitPerpetualsUsd, SubKind::OrderBooksL1) => {
-                                        init_market_stream(
-                                            STREAM_RECONNECTION_POLICY,
-                                            subs.into_iter()
-                                                .map(|sub| {
-                                                    Subscription::new(
-                                                        BybitPerpetualsUsd::default(),
-                                                        sub.instrument,
-                                                        OrderBooksL1,
-                                                    )
-                                                })
-                                                .collect(),
-                                        )
-                                        .await
-                                        .map(|stream| {
-                                            tokio::spawn(stream.forward_to(
-                                                txs.l1s.get(&exchange).unwrap().clone(),
-                                            ))
-                                        })
-                                    }
-                                    (ExchangeId::BybitPerpetualsUsd, SubKind::OrderBooksL2) => {
-                                        init_market_stream(
-                                            STREAM_RECONNECTION_POLICY,
-                                            subs.into_iter()
-                                                .map(|sub| {
-                                                    Subscription::new(
-                                                        BybitPerpetualsUsd::default(),
-                                                        sub.instrument,
-                                                        OrderBooksL2,
-                                                    )
-                                                })
-                                                .collect(),
-                                        )
-                                        .await
-                                        .map(|stream| {
-                                            tokio::spawn(stream.forward_to(
-                                                txs.l2s.get(&exchange).unwrap().clone(),
-                                            ))
-                                        })
-                                    }
-                                    (ExchangeId::Coinbase, SubKind::PublicTrades) => {
-                                        init_market_stream(
-                                            STREAM_RECONNECTION_POLICY,
-                                            subs.into_iter()
-                                                .map(|sub| {
-                                                    Subscription::new(
-                                                        Coinbase,
-                                                        sub.instrument,
-                                                        PublicTrades,
-                                                    )
-                                                })
-                                                .collect(),
-                                        )
-                                        .await
-                                        .map(|stream| {
-                                            tokio::spawn(stream.forward_to(
-                                                txs.trades.get(&exchange).unwrap().clone(),
-                                            ))
-                                        })
-                                    }
-                                    (ExchangeId::GateioSpot, SubKind::PublicTrades) => {
-                                        init_market_stream(
-                                            STREAM_RECONNECTION_POLICY,
-                                            subs.into_iter()
-                                                .map(|sub| {
-                                                    Subscription::new(
-                                                        GateioSpot::default(),
-                                                        sub.instrument,
-                                                        PublicTrades,
-                                                    )
-                                                })
-                                                .collect(),
-                                        )
-                                        .await
-                                        .map(|stream| {
-                                            tokio::spawn(stream.forward_to(
-                                                txs.trades.get(&exchange).unwrap().clone(),
-                                            ))
-                                        })
-                                    }
-                                    (ExchangeId::GateioFuturesUsd, SubKind::PublicTrades) => {
-                                        init_market_stream(
-                                            STREAM_RECONNECTION_POLICY,
-                                            subs.into_iter()
-                                                .map(|sub| {
-                                                    Subscription::new(
-                                                        GateioFuturesUsd::default(),
-                                                        sub.instrument,
-                                                        PublicTrades,
-                                                    )
-                                                })
-                                                .collect(),
-                                        )
-                                        .await
-                                        .map(|stream| {
-                                            tokio::spawn(stream.forward_to(
-                                                txs.trades.get(&exchange).unwrap().clone(),
-                                            ))
-                                        })
-                                    }
-                                    (ExchangeId::GateioFuturesBtc, SubKind::PublicTrades) => {
-                                        init_market_stream(
-                                            STREAM_RECONNECTION_POLICY,
-                                            subs.into_iter()
-                                                .map(|sub| {
-                                                    Subscription::new(
-                                                        GateioFuturesBtc::default(),
-                                                        sub.instrument,
-                                                        PublicTrades,
-                                                    )
-                                                })
-                                                .collect(),
-                                        )
-                                        .await
-                                        .map(|stream| {
-                                            tokio::spawn(stream.forward_to(
-                                                txs.trades.get(&exchange).unwrap().clone(),
-                                            ))
-                                        })
-                                    }
-                                    (ExchangeId::GateioPerpetualsUsd, SubKind::PublicTrades) => {
-                                        init_market_stream(
-                                            STREAM_RECONNECTION_POLICY,
-                                            subs.into_iter()
-                                                .map(|sub| {
-                                                    Subscription::new(
-                                                        GateioPerpetualsUsd::default(),
-                                                        sub.instrument,
-                                                        PublicTrades,
-                                                    )
-                                                })
-                                                .collect(),
-                                        )
-                                        .await
-                                        .map(|stream| {
-                                            tokio::spawn(stream.forward_to(
-                                                txs.trades.get(&exchange).unwrap().clone(),
-                                            ))
-                                        })
-                                    }
-                                    (ExchangeId::GateioPerpetualsBtc, SubKind::PublicTrades) => {
-                                        init_market_stream(
-                                            STREAM_RECONNECTION_POLICY,
-                                            subs.into_iter()
-                                                .map(|sub| {
-                                                    Subscription::new(
-                                                        GateioPerpetualsBtc::default(),
-                                                        sub.instrument,
-                                                        PublicTrades,
-                                                    )
-                                                })
-                                                .collect(),
-                                        )
-                                        .await
-                                        .map(|stream| {
-                                            tokio::spawn(stream.forward_to(
-                                                txs.trades.get(&exchange).unwrap().clone(),
-                                            ))
-                                        })
-                                    }
-                                    (ExchangeId::GateioOptions, SubKind::PublicTrades) => {
-                                        init_market_stream(
-                                            STREAM_RECONNECTION_POLICY,
-                                            subs.into_iter()
-                                                .map(|sub| {
-                                                    Subscription::new(
-                                                        GateioOptions::default(),
-                                                        sub.instrument,
-                                                        PublicTrades,
-                                                    )
-                                                })
-                                                .collect(),
-                                        )
-                                        .await
-                                        .map(|stream| {
-                                            tokio::spawn(stream.forward_to(
-                                                txs.trades.get(&exchange).unwrap().clone(),
-                                            ))
-                                        })
-                                    }
-                                    (ExchangeId::Kraken, SubKind::PublicTrades) => {
-                                        init_market_stream(
-                                            STREAM_RECONNECTION_POLICY,
-                                            subs.into_iter()
-                                                .map(|sub| {
-                                                    Subscription::new(
-                                                        Kraken,
-                                                        sub.instrument,
-                                                        PublicTrades,
-                                                    )
-                                                })
-                                                .collect(),
-                                        )
-                                        .await
-                                        .map(|stream| {
-                                            tokio::spawn(stream.forward_to(
-                                                txs.trades.get(&exchange).unwrap().clone(),
-                                            ))
-                                        })
-                                    }
-                                    (ExchangeId::Kraken, SubKind::OrderBooksL1) => {
-                                        init_market_stream(
-                                            STREAM_RECONNECTION_POLICY,
-                                            subs.into_iter()
-                                                .map(|sub| {
-                                                    Subscription::new(
-                                                        Kraken,
-                                                        sub.instrument,
-                                                        OrderBooksL1,
-                                                    )
-                                                })
-                                                .collect(),
-                                        )
-                                        .await
-                                        .map(|stream| {
-                                            tokio::spawn(stream.forward_to(
-                                                txs.l1s.get(&exchange).unwrap().clone(),
-                                            ))
-                                        })
-                                    }
-                                    (ExchangeId::Okx, SubKind::PublicTrades) => init_market_stream(
+            let batch_futures =
+                by_exchange_by_sub_kind
+                    .into_iter()
+                    .map(|((exchange, sub_kind), subs)| {
+                        let subs = subs.into_iter().collect::<Vec<_>>();
+                        let txs = Arc::clone(&channels.txs);
+                        async move {
+                            match (exchange, sub_kind) {
+                                (ExchangeId::BinanceSpot, SubKind::PublicTrades) => {
+                                    init_market_stream(
                                         STREAM_RECONNECTION_POLICY,
                                         subs.into_iter()
                                             .map(|sub| {
-                                                Subscription::new(Okx, sub.instrument, PublicTrades)
+                                                Subscription::new(
+                                                    BinanceSpot::default(),
+                                                    sub.instrument,
+                                                    PublicTrades,
+                                                )
                                             })
                                             .collect(),
                                     )
@@ -626,28 +154,18 @@ impl<InstrumentKey> DynamicStreams<InstrumentKey> {
                                                 txs.trades.get(&exchange).unwrap().clone(),
                                             ),
                                         )
-                                    }),
-                                    (ExchangeId::Ssi, SubKind::PublicTrades) => init_market_stream(
+                                    })
+                                }
+                                (ExchangeId::BinanceSpot, SubKind::OrderBooksL1) => {
+                                    init_market_stream(
                                         STREAM_RECONNECTION_POLICY,
                                         subs.into_iter()
                                             .map(|sub| {
-                                                Subscription::new(Ssi, sub.instrument, PublicTrades)
-                                            })
-                                            .collect(),
-                                    )
-                                    .await
-                                    .map(|stream| {
-                                        tokio::spawn(
-                                            stream.forward_to(
-                                                txs.trades.get(&exchange).unwrap().clone(),
-                                            ),
-                                        )
-                                    }),
-                                    (ExchangeId::Ssi, SubKind::OrderBooksL1) => init_market_stream(
-                                        STREAM_RECONNECTION_POLICY,
-                                        subs.into_iter()
-                                            .map(|sub| {
-                                                Subscription::new(Ssi, sub.instrument, OrderBooksL1)
+                                                Subscription::new(
+                                                    BinanceSpot::default(),
+                                                    sub.instrument,
+                                                    OrderBooksL1,
+                                                )
                                             })
                                             .collect(),
                                     )
@@ -658,12 +176,18 @@ impl<InstrumentKey> DynamicStreams<InstrumentKey> {
                                                 txs.l1s.get(&exchange).unwrap().clone(),
                                             ),
                                         )
-                                    }),
-                                    (ExchangeId::Ssi, SubKind::OrderBooksL2) => init_market_stream(
+                                    })
+                                }
+                                (ExchangeId::BinanceSpot, SubKind::OrderBooksL2) => {
+                                    init_market_stream(
                                         STREAM_RECONNECTION_POLICY,
                                         subs.into_iter()
                                             .map(|sub| {
-                                                Subscription::new(Ssi, sub.instrument, OrderBooksL2)
+                                                Subscription::new(
+                                                    BinanceSpot::default(),
+                                                    sub.instrument,
+                                                    OrderBooksL2,
+                                                )
                                             })
                                             .collect(),
                                     )
@@ -674,16 +198,556 @@ impl<InstrumentKey> DynamicStreams<InstrumentKey> {
                                                 txs.l2s.get(&exchange).unwrap().clone(),
                                             ),
                                         )
-                                    }),
-                                    (exchange, sub_kind) => {
-                                        Err(DataError::Unsupported { exchange, sub_kind })
-                                    }
+                                    })
+                                }
+                                (ExchangeId::BinanceFuturesUsd, SubKind::PublicTrades) => {
+                                    init_market_stream(
+                                        STREAM_RECONNECTION_POLICY,
+                                        subs.into_iter()
+                                            .map(|sub| {
+                                                Subscription::new(
+                                                    BinanceFuturesUsd::default(),
+                                                    sub.instrument,
+                                                    PublicTrades,
+                                                )
+                                            })
+                                            .collect(),
+                                    )
+                                    .await
+                                    .map(|stream| {
+                                        tokio::spawn(
+                                            stream.forward_to(
+                                                txs.trades.get(&exchange).unwrap().clone(),
+                                            ),
+                                        )
+                                    })
+                                }
+                                (ExchangeId::BinanceFuturesUsd, SubKind::OrderBooksL1) => {
+                                    init_market_stream(
+                                        STREAM_RECONNECTION_POLICY,
+                                        subs.into_iter()
+                                            .map(|sub| {
+                                                Subscription::<_, Instrument, _>::new(
+                                                    BinanceFuturesUsd::default(),
+                                                    sub.instrument,
+                                                    OrderBooksL1,
+                                                )
+                                            })
+                                            .collect(),
+                                    )
+                                    .await
+                                    .map(|stream| {
+                                        tokio::spawn(
+                                            stream.forward_to(
+                                                txs.l1s.get(&exchange).unwrap().clone(),
+                                            ),
+                                        )
+                                    })
+                                }
+                                (ExchangeId::BinanceFuturesUsd, SubKind::OrderBooksL2) => {
+                                    init_market_stream(
+                                        STREAM_RECONNECTION_POLICY,
+                                        subs.into_iter()
+                                            .map(|sub| {
+                                                Subscription::<_, Instrument, _>::new(
+                                                    BinanceFuturesUsd::default(),
+                                                    sub.instrument,
+                                                    OrderBooksL2,
+                                                )
+                                            })
+                                            .collect(),
+                                    )
+                                    .await
+                                    .map(|stream| {
+                                        tokio::spawn(
+                                            stream.forward_to(
+                                                txs.l2s.get(&exchange).unwrap().clone(),
+                                            ),
+                                        )
+                                    })
+                                }
+                                (ExchangeId::BinanceFuturesUsd, SubKind::Liquidations) => {
+                                    init_market_stream(
+                                        STREAM_RECONNECTION_POLICY,
+                                        subs.into_iter()
+                                            .map(|sub| {
+                                                Subscription::<_, Instrument, _>::new(
+                                                    BinanceFuturesUsd::default(),
+                                                    sub.instrument,
+                                                    Liquidations,
+                                                )
+                                            })
+                                            .collect(),
+                                    )
+                                    .await
+                                    .map(|stream| {
+                                        tokio::spawn(stream.forward_to(
+                                            txs.liquidations.get(&exchange).unwrap().clone(),
+                                        ))
+                                    })
+                                }
+                                (ExchangeId::Bitfinex, SubKind::PublicTrades) => {
+                                    init_market_stream(
+                                        STREAM_RECONNECTION_POLICY,
+                                        subs.into_iter()
+                                            .map(|sub| {
+                                                Subscription::new(
+                                                    Bitfinex,
+                                                    sub.instrument,
+                                                    PublicTrades,
+                                                )
+                                            })
+                                            .collect(),
+                                    )
+                                    .await
+                                    .map(|stream| {
+                                        tokio::spawn(
+                                            stream.forward_to(
+                                                txs.trades.get(&exchange).unwrap().clone(),
+                                            ),
+                                        )
+                                    })
+                                }
+                                (ExchangeId::Bitmex, SubKind::PublicTrades) => init_market_stream(
+                                    STREAM_RECONNECTION_POLICY,
+                                    subs.into_iter()
+                                        .map(|sub| {
+                                            Subscription::new(Bitmex, sub.instrument, PublicTrades)
+                                        })
+                                        .collect(),
+                                )
+                                .await
+                                .map(|stream| {
+                                    tokio::spawn(
+                                        stream
+                                            .forward_to(txs.trades.get(&exchange).unwrap().clone()),
+                                    )
+                                }),
+                                (ExchangeId::BybitSpot, SubKind::PublicTrades) => {
+                                    init_market_stream(
+                                        STREAM_RECONNECTION_POLICY,
+                                        subs.into_iter()
+                                            .map(|sub| {
+                                                Subscription::new(
+                                                    BybitSpot::default(),
+                                                    sub.instrument,
+                                                    PublicTrades,
+                                                )
+                                            })
+                                            .collect(),
+                                    )
+                                    .await
+                                    .map(|stream| {
+                                        tokio::spawn(
+                                            stream.forward_to(
+                                                txs.trades.get(&exchange).unwrap().clone(),
+                                            ),
+                                        )
+                                    })
+                                }
+                                (ExchangeId::BybitSpot, SubKind::OrderBooksL1) => {
+                                    init_market_stream(
+                                        STREAM_RECONNECTION_POLICY,
+                                        subs.into_iter()
+                                            .map(|sub| {
+                                                Subscription::new(
+                                                    BybitSpot::default(),
+                                                    sub.instrument,
+                                                    OrderBooksL1,
+                                                )
+                                            })
+                                            .collect(),
+                                    )
+                                    .await
+                                    .map(|stream| {
+                                        tokio::spawn(
+                                            stream.forward_to(
+                                                txs.l1s.get(&exchange).unwrap().clone(),
+                                            ),
+                                        )
+                                    })
+                                }
+                                (ExchangeId::BybitSpot, SubKind::OrderBooksL2) => {
+                                    init_market_stream(
+                                        STREAM_RECONNECTION_POLICY,
+                                        subs.into_iter()
+                                            .map(|sub| {
+                                                Subscription::new(
+                                                    BybitSpot::default(),
+                                                    sub.instrument,
+                                                    OrderBooksL2,
+                                                )
+                                            })
+                                            .collect(),
+                                    )
+                                    .await
+                                    .map(|stream| {
+                                        tokio::spawn(
+                                            stream.forward_to(
+                                                txs.l2s.get(&exchange).unwrap().clone(),
+                                            ),
+                                        )
+                                    })
+                                }
+                                (ExchangeId::BybitPerpetualsUsd, SubKind::PublicTrades) => {
+                                    init_market_stream(
+                                        STREAM_RECONNECTION_POLICY,
+                                        subs.into_iter()
+                                            .map(|sub| {
+                                                Subscription::new(
+                                                    BybitPerpetualsUsd::default(),
+                                                    sub.instrument,
+                                                    PublicTrades,
+                                                )
+                                            })
+                                            .collect(),
+                                    )
+                                    .await
+                                    .map(|stream| {
+                                        tokio::spawn(
+                                            stream.forward_to(
+                                                txs.trades.get(&exchange).unwrap().clone(),
+                                            ),
+                                        )
+                                    })
+                                }
+                                (ExchangeId::BybitPerpetualsUsd, SubKind::OrderBooksL1) => {
+                                    init_market_stream(
+                                        STREAM_RECONNECTION_POLICY,
+                                        subs.into_iter()
+                                            .map(|sub| {
+                                                Subscription::new(
+                                                    BybitPerpetualsUsd::default(),
+                                                    sub.instrument,
+                                                    OrderBooksL1,
+                                                )
+                                            })
+                                            .collect(),
+                                    )
+                                    .await
+                                    .map(|stream| {
+                                        tokio::spawn(
+                                            stream.forward_to(
+                                                txs.l1s.get(&exchange).unwrap().clone(),
+                                            ),
+                                        )
+                                    })
+                                }
+                                (ExchangeId::BybitPerpetualsUsd, SubKind::OrderBooksL2) => {
+                                    init_market_stream(
+                                        STREAM_RECONNECTION_POLICY,
+                                        subs.into_iter()
+                                            .map(|sub| {
+                                                Subscription::new(
+                                                    BybitPerpetualsUsd::default(),
+                                                    sub.instrument,
+                                                    OrderBooksL2,
+                                                )
+                                            })
+                                            .collect(),
+                                    )
+                                    .await
+                                    .map(|stream| {
+                                        tokio::spawn(
+                                            stream.forward_to(
+                                                txs.l2s.get(&exchange).unwrap().clone(),
+                                            ),
+                                        )
+                                    })
+                                }
+                                (ExchangeId::Coinbase, SubKind::PublicTrades) => {
+                                    init_market_stream(
+                                        STREAM_RECONNECTION_POLICY,
+                                        subs.into_iter()
+                                            .map(|sub| {
+                                                Subscription::new(
+                                                    Coinbase,
+                                                    sub.instrument,
+                                                    PublicTrades,
+                                                )
+                                            })
+                                            .collect(),
+                                    )
+                                    .await
+                                    .map(|stream| {
+                                        tokio::spawn(
+                                            stream.forward_to(
+                                                txs.trades.get(&exchange).unwrap().clone(),
+                                            ),
+                                        )
+                                    })
+                                }
+                                (ExchangeId::GateioSpot, SubKind::PublicTrades) => {
+                                    init_market_stream(
+                                        STREAM_RECONNECTION_POLICY,
+                                        subs.into_iter()
+                                            .map(|sub| {
+                                                Subscription::new(
+                                                    GateioSpot::default(),
+                                                    sub.instrument,
+                                                    PublicTrades,
+                                                )
+                                            })
+                                            .collect(),
+                                    )
+                                    .await
+                                    .map(|stream| {
+                                        tokio::spawn(
+                                            stream.forward_to(
+                                                txs.trades.get(&exchange).unwrap().clone(),
+                                            ),
+                                        )
+                                    })
+                                }
+                                (ExchangeId::GateioFuturesUsd, SubKind::PublicTrades) => {
+                                    init_market_stream(
+                                        STREAM_RECONNECTION_POLICY,
+                                        subs.into_iter()
+                                            .map(|sub| {
+                                                Subscription::new(
+                                                    GateioFuturesUsd::default(),
+                                                    sub.instrument,
+                                                    PublicTrades,
+                                                )
+                                            })
+                                            .collect(),
+                                    )
+                                    .await
+                                    .map(|stream| {
+                                        tokio::spawn(
+                                            stream.forward_to(
+                                                txs.trades.get(&exchange).unwrap().clone(),
+                                            ),
+                                        )
+                                    })
+                                }
+                                (ExchangeId::GateioFuturesBtc, SubKind::PublicTrades) => {
+                                    init_market_stream(
+                                        STREAM_RECONNECTION_POLICY,
+                                        subs.into_iter()
+                                            .map(|sub| {
+                                                Subscription::new(
+                                                    GateioFuturesBtc::default(),
+                                                    sub.instrument,
+                                                    PublicTrades,
+                                                )
+                                            })
+                                            .collect(),
+                                    )
+                                    .await
+                                    .map(|stream| {
+                                        tokio::spawn(
+                                            stream.forward_to(
+                                                txs.trades.get(&exchange).unwrap().clone(),
+                                            ),
+                                        )
+                                    })
+                                }
+                                (ExchangeId::GateioPerpetualsUsd, SubKind::PublicTrades) => {
+                                    init_market_stream(
+                                        STREAM_RECONNECTION_POLICY,
+                                        subs.into_iter()
+                                            .map(|sub| {
+                                                Subscription::new(
+                                                    GateioPerpetualsUsd::default(),
+                                                    sub.instrument,
+                                                    PublicTrades,
+                                                )
+                                            })
+                                            .collect(),
+                                    )
+                                    .await
+                                    .map(|stream| {
+                                        tokio::spawn(
+                                            stream.forward_to(
+                                                txs.trades.get(&exchange).unwrap().clone(),
+                                            ),
+                                        )
+                                    })
+                                }
+                                (ExchangeId::GateioPerpetualsBtc, SubKind::PublicTrades) => {
+                                    init_market_stream(
+                                        STREAM_RECONNECTION_POLICY,
+                                        subs.into_iter()
+                                            .map(|sub| {
+                                                Subscription::new(
+                                                    GateioPerpetualsBtc::default(),
+                                                    sub.instrument,
+                                                    PublicTrades,
+                                                )
+                                            })
+                                            .collect(),
+                                    )
+                                    .await
+                                    .map(|stream| {
+                                        tokio::spawn(
+                                            stream.forward_to(
+                                                txs.trades.get(&exchange).unwrap().clone(),
+                                            ),
+                                        )
+                                    })
+                                }
+                                (ExchangeId::GateioOptions, SubKind::PublicTrades) => {
+                                    init_market_stream(
+                                        STREAM_RECONNECTION_POLICY,
+                                        subs.into_iter()
+                                            .map(|sub| {
+                                                Subscription::new(
+                                                    GateioOptions::default(),
+                                                    sub.instrument,
+                                                    PublicTrades,
+                                                )
+                                            })
+                                            .collect(),
+                                    )
+                                    .await
+                                    .map(|stream| {
+                                        tokio::spawn(
+                                            stream.forward_to(
+                                                txs.trades.get(&exchange).unwrap().clone(),
+                                            ),
+                                        )
+                                    })
+                                }
+                                (ExchangeId::Kraken, SubKind::PublicTrades) => init_market_stream(
+                                    STREAM_RECONNECTION_POLICY,
+                                    subs.into_iter()
+                                        .map(|sub| {
+                                            Subscription::new(Kraken, sub.instrument, PublicTrades)
+                                        })
+                                        .collect(),
+                                )
+                                .await
+                                .map(|stream| {
+                                    tokio::spawn(
+                                        stream
+                                            .forward_to(txs.trades.get(&exchange).unwrap().clone()),
+                                    )
+                                }),
+                                (ExchangeId::Kraken, SubKind::OrderBooksL1) => init_market_stream(
+                                    STREAM_RECONNECTION_POLICY,
+                                    subs.into_iter()
+                                        .map(|sub| {
+                                            Subscription::new(Kraken, sub.instrument, OrderBooksL1)
+                                        })
+                                        .collect(),
+                                )
+                                .await
+                                .map(|stream| {
+                                    tokio::spawn(
+                                        stream.forward_to(txs.l1s.get(&exchange).unwrap().clone()),
+                                    )
+                                }),
+                                (ExchangeId::Okx, SubKind::PublicTrades) => init_market_stream(
+                                    STREAM_RECONNECTION_POLICY,
+                                    subs.into_iter()
+                                        .map(|sub| {
+                                            Subscription::new(Okx, sub.instrument, PublicTrades)
+                                        })
+                                        .collect(),
+                                )
+                                .await
+                                .map(|stream| {
+                                    tokio::spawn(
+                                        stream
+                                            .forward_to(txs.trades.get(&exchange).unwrap().clone()),
+                                    )
+                                }),
+                                (ExchangeId::Ssi, SubKind::PublicTrades) => init_market_stream(
+                                    STREAM_RECONNECTION_POLICY,
+                                    subs.into_iter()
+                                        .map(|sub| {
+                                            Subscription::new(Ssi, sub.instrument, PublicTrades)
+                                        })
+                                        .collect(),
+                                )
+                                .await
+                                .map(|stream| {
+                                    tokio::spawn(
+                                        stream
+                                            .forward_to(txs.trades.get(&exchange).unwrap().clone()),
+                                    )
+                                }),
+                                (ExchangeId::Ssi, SubKind::OrderBooksL1) => init_market_stream(
+                                    STREAM_RECONNECTION_POLICY,
+                                    subs.into_iter()
+                                        .map(|sub| {
+                                            Subscription::new(Ssi, sub.instrument, OrderBooksL1)
+                                        })
+                                        .collect(),
+                                )
+                                .await
+                                .map(|stream| {
+                                    tokio::spawn(
+                                        stream.forward_to(txs.l1s.get(&exchange).unwrap().clone()),
+                                    )
+                                }),
+                                (ExchangeId::Ssi, SubKind::OrderBooksL2) => init_market_stream(
+                                    STREAM_RECONNECTION_POLICY,
+                                    subs.into_iter()
+                                        .map(|sub| {
+                                            Subscription::new(Ssi, sub.instrument, OrderBooksL2)
+                                        })
+                                        .collect(),
+                                )
+                                .await
+                                .map(|stream| {
+                                    tokio::spawn(
+                                        stream.forward_to(txs.l2s.get(&exchange).unwrap().clone()),
+                                    )
+                                }),
+                                (ExchangeId::Tcbs, SubKind::PublicTrades) => init_market_stream(
+                                    STREAM_RECONNECTION_POLICY,
+                                    subs.into_iter()
+                                        .map(|sub| {
+                                            Subscription::new(Tcbs, sub.instrument, PublicTrades)
+                                        })
+                                        .collect(),
+                                )
+                                .await
+                                .map(|stream| {
+                                    tokio::spawn(
+                                        stream
+                                            .forward_to(txs.trades.get(&exchange).unwrap().clone()),
+                                    )
+                                }),
+                                (ExchangeId::Tcbs, SubKind::OrderBooksL1) => init_market_stream(
+                                    STREAM_RECONNECTION_POLICY,
+                                    subs.into_iter()
+                                        .map(|sub| {
+                                            Subscription::new(Tcbs, sub.instrument, OrderBooksL1)
+                                        })
+                                        .collect(),
+                                )
+                                .await
+                                .map(|stream| {
+                                    tokio::spawn(
+                                        stream.forward_to(txs.l1s.get(&exchange).unwrap().clone()),
+                                    )
+                                }),
+                                (ExchangeId::Tcbs, SubKind::OrderBooksL2) => init_market_stream(
+                                    STREAM_RECONNECTION_POLICY,
+                                    subs.into_iter()
+                                        .map(|sub| {
+                                            Subscription::new(Tcbs, sub.instrument, OrderBooksL2)
+                                        })
+                                        .collect(),
+                                )
+                                .await
+                                .map(|stream| {
+                                    tokio::spawn(
+                                        stream.forward_to(txs.l2s.get(&exchange).unwrap().clone()),
+                                    )
+                                }),
+                                (exchange, sub_kind) => {
+                                    Err(DataError::Unsupported { exchange, sub_kind })
                                 }
                             }
-                        });
+                        }
+                    });
 
-                try_join_all(batch_futures)
-            });
+            try_join_all(batch_futures)
+        });
 
         try_join_all(futures).await?;
 
