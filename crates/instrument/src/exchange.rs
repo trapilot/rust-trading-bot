@@ -74,6 +74,10 @@ pub enum ExchangeId {
     Mexc,
     Okx,
     Poloniex,
+    /// SSI Securities (Vietnam stock market), via SSI FastConnect Data.
+    Ssi,
+    /// Techcombank Securities (Vietnam stock market), via TCBS iFlash Open API.
+    Tcbs,
 }
 
 impl ExchangeId {
@@ -122,6 +126,8 @@ impl ExchangeId {
             ExchangeId::Mexc => "mexc",
             ExchangeId::Okx => "okx",
             ExchangeId::Poloniex => "poloniex",
+            ExchangeId::Ssi => "ssi",
+            ExchangeId::Tcbs => "tcbs",
         }
     }
 }
